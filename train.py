@@ -1,47 +1,47 @@
 import pandas as pd
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score
 import joblib
 import mlflow
 import mlflow.sklearn
 
-# Cargar dataset de cáncer de mama
-breast_cancer = datasets.load_breast_cancer()
-X = breast_cancer.data
-y = breast_cancer.target
+# Mismo dataset (Iris)
+iris = datasets.load_iris()
+X = iris.data
+y = iris.target
 
-# Iniciar un experimento de MLflow
 with mlflow.start_run():
-    # Dividir en train/test
+    # Split idéntico en espíritu
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=0
+        X, y, test_size=0.3, random_state=42, stratify=y
     )
 
-    # Modelo: Regresión logística
-    model = LogisticRegression(max_iter=500, solver="liblinear")
+    # Modelo distinto: SVC con escalado
+    model = Pipeline(steps=[
+        ("scaler", StandardScaler()),
+        ("svc", SVC(C=1.0, kernel="rbf", gamma="scale", random_state=42))
+    ])
     model.fit(X_train, y_train)
 
-    # Predicciones
+    # Predicciones y métricas
     y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    f1m = f1_score(y_test, y_pred, average="macro")
 
-    # Métricas
-    accuracy = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
+    # MLflow: params y métricas
+    mlflow.log_param("model_type", "Pipeline(StandardScaler+SVC)")
+    mlflow.log_param("svc_kernel", "rbf")
+    mlflow.log_param("svc_C", 1.0)
+    mlflow.log_param("svc_gamma", "scale")
+    mlflow.log_metric("accuracy", acc)
+    mlflow.log_metric("f1_macro", f1m)
 
-    # Log MLflow
-    mlflow.log_param("model_type", "LogisticRegression")
-    mlflow.log_param("max_iter", 500)
-    mlflow.log_param("solver", "liblinear")
-    mlflow.log_metric("accuracy", accuracy)
-    mlflow.log_metric("f1_score", f1)
+    # Guardado local y registro
+    joblib.dump(model, "svc_iris.pkl")
+    mlflow.sklearn.log_model(model, "svc-iris-model")
 
-    # Guardar modelo local
-    joblib.dump(model, "logreg_model.pkl")
-
-    # Registrar en MLflow
-    mlflow.sklearn.log_model(model, "logreg-model")
-
-    print(f"Modelo entrenado. Accuracy: {accuracy:.4f}, F1: {f1:.4f}")
-    print("Experimento registrado en MLflow.")
+    print(f"Accuracy: {acc:.4f} | F1-macro: {f1m:.4f}")
