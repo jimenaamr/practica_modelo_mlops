@@ -1,47 +1,65 @@
-import pandas as pd
-from sklearn import datasets
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, f1_score
-import joblib
-import mlflow
-import mlflow.sklearn
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
 
-# Mismo dataset (Iris)
-iris = datasets.load_iris()
-X = iris.data
-y = iris.target
+# ----- 1) Datos (lee los .idx locales) -----
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
 
-with mlflow.start_run():
-    # Split idéntico en espíritu
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42, stratify=y
-    )
+# Si tus .idx están en ./data/MNIST/raw/, usa root="./data"
+# (si los tienes en otra ruta, cambia root a esa carpeta base)
+train_dataset = datasets.MNIST(root="./data", train=True,  transform=transform, download=False)
+test_dataset  = datasets.MNIST(root="./data", train=False, transform=transform, download=False)
 
-    # Modelo distinto: SVC con escalado
-    model = Pipeline(steps=[
-        ("scaler", StandardScaler()),
-        ("svc", SVC(C=1.0, kernel="rbf", gamma="scale", random_state=42))
-    ])
-    model.fit(X_train, y_train)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+test_loader  = DataLoader(test_dataset,  batch_size=64, shuffle=False)
 
-    # Predicciones y métricas
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    f1m = f1_score(y_test, y_pred, average="macro")
+# ----- 2) Modelo -----
+class SimpleNN(nn.Module):
+    def __init__(self):
+        super(SimpleNN, self).__init__()
+        self.fc1 = nn.Linear(28*28, 128)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(128, 10)
 
-    # MLflow: params y métricas
-    mlflow.log_param("model_type", "Pipeline(StandardScaler+SVC)")
-    mlflow.log_param("svc_kernel", "rbf")
-    mlflow.log_param("svc_C", 1.0)
-    mlflow.log_param("svc_gamma", "scale")
-    mlflow.log_metric("accuracy", acc)
-    mlflow.log_metric("f1_macro", f1m)
+    def forward(self, x):
+        x = x.view(-1, 28*28)
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
 
-    # Guardado local y registro
-    joblib.dump(model, "svc_iris.pkl")
-    mlflow.sklearn.log_model(model, "svc-iris-model")
+model = SimpleNN()
 
-    print(f"Accuracy: {acc:.4f} | F1-macro: {f1m:.4f}")
+# ----- 3) Pérdida y optimizador -----
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+# ----- 4) Entrenamiento -----
+epochs = 5
+for epoch in range(epochs):
+    model.train()
+    running_loss = 0.0
+    for images, labels in train_loader:
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+    print(f"Epoch {epoch+1}, Loss: {running_loss/len(train_loader):.4f}")
+
+# ----- 5) Evaluación -----
+model.eval()
+correct, total = 0, 0
+with torch.no_grad():
+    for images, labels in test_loader:
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f"Accuracy: {100 * correct / total:.2f}%")
